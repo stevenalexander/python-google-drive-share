@@ -49,7 +49,7 @@ def iterfiles(name=None, is_folder=None, parent=None, order_by='folder,name,crea
                 else:
                     permissions.append('%s=%s' % (p['role'],p['type']))
 
-            print('"%s","%s","%s"' % (f['id'],f['name'], '","'.join(permissions)))
+            print('"%s","%s","%s"' % (f['id'],f['name'], ','.join(permissions)))
             yield f
         try:
             params['pageToken'] = response['nextPageToken']
