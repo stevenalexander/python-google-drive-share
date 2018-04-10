@@ -1,72 +1,75 @@
-from __future__ import print_function
-import httplib2
+# walk_gdrive.py - os.walk variation with Google Drive API
+
 import os
+import json
+import argparse
 
-from apiclient import discovery
-from oauth2client import client
-from oauth2client import tools
-from oauth2client.file import Storage
+from apiclient.discovery import build  # pip install google-api-python-client
+from oauth2client import file, client, tools
 
-try:
-    import argparse
-    flags = argparse.ArgumentParser(parents=[tools.argparser]).parse_args()
-except ImportError:
-    flags = None
+FOLDER = 'application/vnd.google-apps.folder'
 
-# If modifying these scopes, delete your previously saved credentials
-# at ~/.credentials/google-drive-share.json
-SCOPES = 'https://www.googleapis.com/auth/drive.metadata.readonly'
-CLIENT_SECRET_FILE = 'client_secret.json'
-APPLICATION_NAME = 'Drive API Python Quickstart'
+def get_credentials(scopes, flags, secrets='client_secret.json', storage='~/.credentials/google-drive-share.json'):
 
+    store = file.Storage(os.path.expanduser(storage))
+    creds = store.get()
+    if creds is None or creds.invalid:
+        flow = client.flow_from_clientsecrets(os.path.expanduser(secrets), scopes)
+        creds = tools.run_flow(flow, store, flags)
+    return creds
 
-def get_credentials():
-    """Gets valid user credentials from storage.
+parser = argparse.ArgumentParser(
+    description='Walks Google Drive folder and emits csv with file/folders sharing permissions',
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    parents=[tools.argparser])
+parser.add_argument('--folderId', dest='folderId', required=True, help='Google Drive folderId (found in url when folder is open')
+args = parser.parse_args()
+creds = get_credentials('https://www.googleapis.com/auth/drive.metadata.readonly', args)
+service = build('drive', version='v3', credentials=creds)
 
-    If nothing has been stored, or if the stored credentials are invalid,
-    the OAuth2 flow is completed to obtain the new credentials.
+def iterfiles(name=None, is_folder=None, parent=None, order_by='folder,name,createdTime'):
+    q = []
+    if name is not None:
+        q.append("name = '%s'" % name.replace("'", "\\'"))
+    if is_folder is not None:
+        q.append("mimeType %s '%s'" % ('=' if is_folder else '!=', FOLDER))
+    if parent is not None:
+        q.append("'%s' in parents" % parent.replace("'", "\\'"))
+    params = {'pageToken': None, 'orderBy': order_by}
+    if q:
+        params['q'] = ' and '.join(q)
+    while True:
+        response = service.files().list(**params).execute()
+        for f in response['files']:
+            permissionList = service.permissions().list(fileId=f['id'],fields='*').execute()
+            permissions = []
+            for p in permissionList['permissions']:
+                if 'emailAddress' in p:
+                    permissions.append('%s=%s' % (p['role'],p['emailAddress']))
+                else:
+                    permissions.append('%s=%s' % (p['role'],p['type']))
 
-    Returns:
-        Credentials, the obtained credential.
-    """
-    home_dir = os.path.expanduser('~')
-    credential_dir = os.path.join(home_dir, '.credentials')
-    if not os.path.exists(credential_dir):
-        os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir,
-                                   'google-drive-share.json')
+            print('"%s","%s","%s"' % (f['id'],f['name'], '","'.join(permissions)))
+            yield f
+        try:
+            params['pageToken'] = response['nextPageToken']
+        except KeyError:
+            return
 
-    store = Storage(credential_path)
-    credentials = store.get()
-    if not credentials or credentials.invalid:
-        flow = client.flow_from_clientsecrets(CLIENT_SECRET_FILE, SCOPES)
-        flow.user_agent = APPLICATION_NAME
-        if flags:
-            credentials = tools.run_flow(flow, store, flags)
-        else: # Needed only for compatibility with Python 2.6
-            credentials = tools.run(flow, store)
-        print('Storing credentials to ' + credential_path)
-    return credentials
+def walk(folderId):
+    top, = iterfiles(parent=folderId, is_folder=True)
+    stack = [((top['name'],), [top])]
+    while stack:
+        path, tops = stack.pop()
+        for top in tops:
+            dirs, files = is_file = [], []
+            for f in iterfiles(parent=top['id']):
+                is_file[f['mimeType'] != FOLDER].append(f)
+            yield path, top, dirs, files
+            if dirs:
+                stack.append((path + (top['name'],), dirs))
 
-def main():
-    """Shows basic usage of the Google Drive API.
-
-    Creates a Google Drive API service object and outputs the names and IDs
-    for up to 10 files.
-    """
-    credentials = get_credentials()
-    http = credentials.authorize(httplib2.Http())
-    service = discovery.build('drive', 'v3', http=http)
-
-    results = service.files().list(
-        pageSize=10,fields="nextPageToken, files(id, name)").execute()
-    items = results.get('files', [])
-    if not items:
-        print('No files found.')
-    else:
-        print('Files:')
-        for item in items:
-            print('{0} ({1})'.format(item['name'], item['id']))
-
-if __name__ == '__main__':
-    main()
+print('id,name,permissions')
+results_count=[]
+for path, root, dirs, files in walk(args.folderId):
+    results_count.append('%s\t%d %d' % ('/'.join(path), len(dirs), len(files)))
