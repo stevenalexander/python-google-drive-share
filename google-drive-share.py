@@ -23,8 +23,9 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.RawDescriptionHelpFormatter,
     parents=[tools.argparser])
 parser.add_argument('--folderId', dest='folderId', required=True, help='Google Drive folderId (found in url when folder is open')
+parser.add_argument('--emailAddressWhitelist', dest='emailAddressWhitelist', nargs='*', default=[], help='if present will attempt to remove permissions from all emailAddresses not in the whitelist or the owner, including public share links')
 args = parser.parse_args()
-creds = get_credentials('https://www.googleapis.com/auth/drive.metadata.readonly', args)
+creds = get_credentials('https://www.googleapis.com/auth/drive', args)
 service = build('drive', version='v3', credentials=creds)
 
 def iterfiles(name=None, is_folder=None, parent=None, order_by='folder,name,createdTime'):
@@ -43,13 +44,23 @@ def iterfiles(name=None, is_folder=None, parent=None, order_by='folder,name,crea
         for f in response['files']:
             permissionList = service.permissions().list(fileId=f['id'],fields='*').execute()
             permissions = []
+            permissionIdsToRemove = []
             for p in permissionList['permissions']:
                 if 'emailAddress' in p:
                     permissions.append('%s=%s' % (p['role'],p['emailAddress']))
+                    if p['role'] != 'owner' and p['emailAddress'] not in args.emailAddressWhitelist:
+                        permissionIdsToRemove.append(p['id'])
                 else:
                     permissions.append('%s=%s' % (p['role'],p['type']))
+                    permissionIdsToRemove.append(p['id'])
 
             print('"%s","%s","%s"' % (f['id'],f['name'], ','.join(permissions)))
+
+            if args.emailAddressWhitelist:
+                for permissionId in permissionIdsToRemove:
+                    print('removing permissions: %s' % ','.join(permissionIdsToRemove))
+                    permissionList = service.permissions().delete(fileId=f['id'],permissionId=permissionId).execute()
+
             yield f
         try:
             params['pageToken'] = response['nextPageToken']
