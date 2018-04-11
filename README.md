@@ -1,6 +1,6 @@
 # Python Google Drive share
 
-Simple Python script to list share details on a Google Drive folders children.
+Simple Python script to list share details on a Google Drive folders children and optionally remove permissions including share links compared to a whitelist.
 
 Outputs csv with the id,name,permissions of all the folders/files in the folder, e.g.:
 ```
@@ -24,7 +24,12 @@ pip install --upgrade google-api-python-client
 First time it runs it will open a browser window for oauth confirmation of Drive access permissions, later calls will use saved credentials in `~/.credentials/google-drive-share.json` delete to reset.
 
 ```
+# help
+python google-drive-share.py --help
+
 # get folderId from URL in Google Drive
 python google-drive-share.py --folderId MYFOLDERID > permissions.csv
-```
 
+# remove permissions not on whitelist
+python google-drive-share.py --folderId MYFOLDERID --emailAddressWhitelist allowedUser1@test.com allowedUser2@test.com
+```
