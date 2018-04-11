@@ -57,7 +57,7 @@ def iterfiles(name=None, is_folder=None, parent=None, order_by='folder,name,crea
             return
 
 def walk(folderId):
-    top, = iterfiles(parent=folderId, is_folder=True)
+    top = service.files().get(fileId=folderId).execute()
     stack = [((top['name'],), [top])]
     while stack:
         path, tops = stack.pop()
